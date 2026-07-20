@@ -668,6 +668,9 @@ export default function NISSDashboard({
                   <span style={{ color: '#fff', fontSize: '11px', fontWeight: 600, letterSpacing: '.03em' }}>
                     {online ? (deviceInfo?.status ?? 'Online') : 'Offline'}
                   </span>
+                  {online && (
+                    <span title="MQTT terenkripsi AES-128-GCM" style={{ fontSize: '11px', opacity: 0.85, cursor: 'default' }}>🔒</span>
+                  )}
                 </div>
                 {recording && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '7px', background: 'rgba(239,68,68,.92)', borderRadius: '11px', padding: '6px 11px' }}>
