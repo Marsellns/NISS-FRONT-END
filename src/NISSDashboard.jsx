@@ -13,6 +13,7 @@ import {
   getCsStats,
   NGROK_HEADERS,
   analyzePhoto,
+  getCsQuality,
 } from './api'
 
 // ─── Konstanta visual (tidak berubah) ────────────────────────────────────────
@@ -142,6 +143,10 @@ export default function NISSDashboard({
   const [analyzing,   setAnalyzing]   = useState(false)
   const [analysis,    setAnalysis]    = useState(null)   // { prediction, confidence, probabilities }
   const [analysisErr, setAnalysisErr] = useState(null)
+  const [csQualityOpen, setCsQualityOpen] = useState(false)  // toggle panel "Info Kompresi" di modal galeri
+  const [csQualityLoading, setCsQualityLoading] = useState(false)
+  const [csQuality,    setCsQuality]    = useState(null)  // { csType, mrPercent, psnr, ssim, originalBytes, csPayloadBytes }
+  const [csQualityErr, setCsQualityErr] = useState(null)
   const frameUrlRef = useRef(null)
   const [filterType,  setFilterType]  = useState('Semua') // filter Riwayat: Semua|Video|Foto
 
@@ -434,6 +439,30 @@ export default function NISSDashboard({
     }
   }
 
+  // ── Toggle "Info Kompresi": simulasi encode+decode CS di atas foto/thumbnail
+  // yang sedang dibuka, tampilkan jenis metode, PSNR, dan SSIM ──
+  async function onToggleCsQuality() {
+    const willOpen = !csQualityOpen
+    setCsQualityOpen(willOpen)
+    if (!willOpen || csQuality || csQualityLoading || !modalItem.id) return
+    setCsQualityLoading(true)
+    setCsQualityErr(null)
+    try {
+      const imgUrl = modalItem.isVideo ? getThumbnailUrl(modalItem.id) : modalUrl
+      if (!imgUrl) throw new Error('Media belum siap')
+      const res = await fetch(imgUrl, { headers: NGROK_HEADERS })
+      if (!res.ok) throw new Error(`Gagal mengambil gambar (${res.status})`)
+      const blob = await res.blob()
+      const result = await getCsQuality(blob)
+      setCsQuality(result)
+    } catch (e) {
+      setCsQualityErr('Gagal menghitung info kompresi. Coba lagi.')
+      setCsQuality(null)
+    } finally {
+      setCsQualityLoading(false)
+    }
+  }
+
   // ── Buka modal galeri + ambil media URL ──
   async function openModal(item) {
     // Revoke blob URL lama jika ada
@@ -448,6 +477,9 @@ export default function NISSDashboard({
     setModalOpen(true)
     setAnalysis(null)
     setAnalysisErr(null)
+    setCsQualityOpen(false)
+    setCsQuality(null)
+    setCsQualityErr(null)
 
     if (!item.id) return
 
@@ -1004,6 +1036,27 @@ export default function NISSDashboard({
                   </svg>
                   {analyzing ? 'Menganalisis…' : 'Analisis'}
                 </button>
+                {/* Toggle Info Kompresi CS (PSNR/SSIM) */}
+                <button
+                  onClick={onToggleCsQuality}
+                  disabled={urlLoading || !!videoError}
+                  title="Info Kompresi (simulasi Compressive Sensing)"
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '6px',
+                    background: csQualityOpen ? 'rgba(122,90,245,.92)' : 'rgba(255,255,255,.08)',
+                    color: csQualityOpen ? '#fff' : 'rgba(255,255,255,.7)',
+                    border: 'none', borderRadius: '10px',
+                    padding: '7px 12px', fontSize: '12px', fontWeight: 600,
+                    cursor: (urlLoading || videoError) ? 'not-allowed' : 'pointer',
+                    fontFamily: 'inherit', opacity: (urlLoading || videoError) ? 0.6 : 1,
+                  }}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                  </svg>
+                  Info Kompresi
+                </button>
                 {/* Tombol download sebagai fallback */}
                 {modalUrl && (
                   <a
@@ -1126,6 +1179,50 @@ export default function NISSDashboard({
                     </span>
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* panel Info Kompresi CS (PSNR/SSIM) */}
+            {csQualityOpen && (
+              <div style={{
+                marginTop: '14px',
+                padding: '12px 16px',
+                borderRadius: '14px',
+                background: csQualityErr ? 'rgba(239,68,68,.08)' : 'rgba(122,90,245,.08)',
+                border: `1px solid ${csQualityErr ? 'rgba(239,68,68,.25)' : 'rgba(122,90,245,.25)'}`,
+              }}>
+                {csQualityLoading ? (
+                  <span style={{ fontSize: '13px', fontWeight: 600, color: 'rgba(255,255,255,.6)' }}>Menghitung info kompresi…</span>
+                ) : csQualityErr ? (
+                  <span style={{ fontSize: '13px', fontWeight: 600, color: '#EF4444' }}>{csQualityErr}</span>
+                ) : csQuality ? (
+                  <div>
+                    <div style={{ fontSize: '12px', fontWeight: 600, color: '#B9A6FF', marginBottom: '8px' }}>
+                      {csQuality.csType} · MR {csQuality.mrPercent}% · blok {csQuality.blockSize}×{csQuality.blockSize}
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '18px' }}>
+                      <div>
+                        <div style={{ fontSize: '18px', fontWeight: 700, color: '#fff' }}>{csQuality.psnr} dB</div>
+                        <div style={{ fontSize: '11px', color: '#8A8A8A' }}>PSNR</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '18px', fontWeight: 700, color: '#fff' }}>{csQuality.ssim}</div>
+                        <div style={{ fontSize: '11px', color: '#8A8A8A' }}>SSIM</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '18px', fontWeight: 700, color: '#fff' }}>{(csQuality.csPayloadBytes / 1024).toFixed(1)} KB</div>
+                        <div style={{ fontSize: '11px', color: '#8A8A8A' }}>Payload CS (simulasi)</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '18px', fontWeight: 700, color: '#fff' }}>{(csQuality.originalBytes / 1024).toFixed(1)} KB</div>
+                        <div style={{ fontSize: '11px', color: '#8A8A8A' }}>File asli (JPEG)</div>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#666', marginTop: '8px' }}>
+                      Simulasi encode+decode CS di atas file JPEG yang tersimpan — bukan payload asli yang dikirim dari Pi (yang mengukur langsung dari frame kamera mentah, bukan hasil JPEG).
+                    </div>
+                  </div>
+                ) : null}
               </div>
             )}
           </div>
