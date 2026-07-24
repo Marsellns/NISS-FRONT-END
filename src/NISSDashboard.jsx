@@ -147,6 +147,8 @@ export default function NISSDashboard({
   const [csQualityLoading, setCsQualityLoading] = useState(false)
   const [csQuality,    setCsQuality]    = useState(null)  // { csType, mrPercent, psnr, ssim, originalBytes, csPayloadBytes }
   const [csQualityErr, setCsQualityErr] = useState(null)
+  const [csMrPercent,  setCsMrPercent]  = useState(100)  // MR (%) yang bisa diatur manual untuk simulasi Info Kompresi
+  const csImageBlobRef = useRef(null)  // cache blob gambar supaya ganti MR tidak perlu fetch ulang
   const frameUrlRef = useRef(null)
   const [filterType,  setFilterType]  = useState('Semua') // filter Riwayat: Semua|Video|Foto
 
@@ -441,19 +443,20 @@ export default function NISSDashboard({
 
   // ── Toggle "Info Kompresi": simulasi encode+decode CS di atas foto/thumbnail
   // yang sedang dibuka, tampilkan jenis metode, PSNR, dan SSIM ──
-  async function onToggleCsQuality() {
-    const willOpen = !csQualityOpen
-    setCsQualityOpen(willOpen)
-    if (!willOpen || csQuality || csQualityLoading || !modalItem.id) return
+  async function runCsQuality(mrPercent) {
     setCsQualityLoading(true)
     setCsQualityErr(null)
     try {
-      const imgUrl = modalItem.isVideo ? getThumbnailUrl(modalItem.id) : modalUrl
-      if (!imgUrl) throw new Error('Media belum siap')
-      const res = await fetch(imgUrl, { headers: NGROK_HEADERS })
-      if (!res.ok) throw new Error(`Gagal mengambil gambar (${res.status})`)
-      const blob = await res.blob()
-      const result = await getCsQuality(blob)
+      let blob = csImageBlobRef.current
+      if (!blob) {
+        const imgUrl = modalItem.isVideo ? getThumbnailUrl(modalItem.id) : modalUrl
+        if (!imgUrl) throw new Error('Media belum siap')
+        const res = await fetch(imgUrl, { headers: NGROK_HEADERS })
+        if (!res.ok) throw new Error(`Gagal mengambil gambar (${res.status})`)
+        blob = await res.blob()
+        csImageBlobRef.current = blob
+      }
+      const result = await getCsQuality(blob, mrPercent)
       setCsQuality(result)
     } catch (e) {
       setCsQualityErr('Gagal menghitung info kompresi. Coba lagi.')
@@ -461,6 +464,18 @@ export default function NISSDashboard({
     } finally {
       setCsQualityLoading(false)
     }
+  }
+
+  async function onToggleCsQuality() {
+    const willOpen = !csQualityOpen
+    setCsQualityOpen(willOpen)
+    if (!willOpen || csQuality || csQualityLoading || !modalItem.id) return
+    runCsQuality(csMrPercent)
+  }
+
+  function onCsMrChange(newMr) {
+    setCsMrPercent(newMr)
+    runCsQuality(newMr)
   }
 
   // ── Buka modal galeri + ambil media URL ──
@@ -480,6 +495,8 @@ export default function NISSDashboard({
     setCsQualityOpen(false)
     setCsQuality(null)
     setCsQualityErr(null)
+    setCsMrPercent(100)
+    csImageBlobRef.current = null
 
     if (!item.id) return
 
@@ -1191,6 +1208,26 @@ export default function NISSDashboard({
                 background: csQualityErr ? 'rgba(239,68,68,.08)' : 'rgba(122,90,245,.08)',
                 border: `1px solid ${csQualityErr ? 'rgba(239,68,68,.25)' : 'rgba(122,90,245,.25)'}`,
               }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: 'rgba(255,255,255,.7)', whiteSpace: 'nowrap' }}>
+                    MR (measurement rate)
+                  </span>
+                  <input
+                    type="range"
+                    min={10}
+                    max={100}
+                    step={5}
+                    value={csMrPercent}
+                    disabled={csQualityLoading}
+                    onChange={(e) => setCsMrPercent(Number(e.target.value))}
+                    onMouseUp={(e) => onCsMrChange(Number(e.target.value))}
+                    onTouchEnd={(e) => onCsMrChange(Number(e.target.value))}
+                    style={{ flex: 1, accentColor: '#7A5AF5' }}
+                  />
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: '#B9A6FF', minWidth: '38px', textAlign: 'right' }}>
+                    {csMrPercent}%
+                  </span>
+                </div>
                 {csQualityLoading ? (
                   <span style={{ fontSize: '13px', fontWeight: 600, color: 'rgba(255,255,255,.6)' }}>Menghitung info kompresi…</span>
                 ) : csQualityErr ? (

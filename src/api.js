@@ -74,8 +74,9 @@ export async function analyzePhoto(imageBlob) {
 
 // ── Info kompresi CS (toggle "Info Kompresi" pada modal galeri) ──────────────
 // imageBlob: Blob JPEG (foto atau thumbnail video yang sedang dibuka di modal)
-export async function getCsQuality(imageBlob) {
-  const res = await fetch(BASE + '/cs-quality', {
+export async function getCsQuality(imageBlob, mrPercent) {
+  const qs = mrPercent ? `?mr=${encodeURIComponent(mrPercent)}` : ''
+  const res = await fetch(BASE + '/cs-quality' + qs, {
     method: 'POST',
     headers: { 'Content-Type': 'image/jpeg', ...NGROK_HEADERS },
     body: imageBlob,
